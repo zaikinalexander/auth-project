@@ -1,0 +1,38 @@
+server:
+  port: 8080
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: auth-backend
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:authdb}
+    username: ${DB_USER:authuser}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+app:
+  jwt:
+    private-key-path: ${JWT_PRIVATE_KEY_PATH:./keys/private.pem}
+    public-key-path: ${JWT_PUBLIC_KEY_PATH:./keys/public.pem}
+    access-token-ttl: 15m
+  refresh:
+    ttl: 7d
+    cookie-name: refresh_token
+    cookie-secure: true
+  security:
+    login-max-attempts: 5
+    login-window: 5m
+  admin:
+    initial-email: ${ADMIN_EMAIL:admin@seoniks.ru}
+    initial-password: ${ADMIN_INITIAL_PASSWORD:}

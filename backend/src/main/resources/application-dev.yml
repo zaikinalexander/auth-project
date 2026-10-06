@@ -1,0 +1,8 @@
+# Профиль для локальной разработки (http://localhost).
+app:
+  refresh:
+    cookie-secure: false
+
+logging:
+  level:
+    ru.seoniks: DEBUG
