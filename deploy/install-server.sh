@@ -91,6 +91,10 @@ systemctl enable --now fail2ban
 
 chown -R authapp:authapp /opt/auth-backend
 
+echo "== 9. Ежедневный бэкап базы =="
+mkdir -p /root/backups && chmod 700 /root/backups
+install -m 644 -o root -g root "$(dirname "$0")/authdb-backup.cron" /etc/cron.d/authdb-backup
+
 echo ""
 echo "Установка завершена."
 echo "Следующий шаг: bash deploy/deploy.sh"

@@ -88,3 +88,7 @@
     sudo -u postgres pg_dump authdb > /root/backup-authdb-$(date +%F).sql
 Копию файла уносите вне сервера. Redis бэкапить не нужно:
 refresh-токены восстанавливаются повторным входом пользователей.
+
+Автоматически: deploy/authdb-backup.cron ставится в /etc/cron.d и делает
+дамп каждый день в 03:00 в /root/backups, хранит семь последних.
+Проверка:  systemctl is-active cron && ls -l /root/backups

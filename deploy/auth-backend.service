@@ -8,6 +8,7 @@ User=authapp
 Group=authapp
 WorkingDirectory=/opt/auth-backend
 EnvironmentFile=/etc/auth-backend/env
+Environment=SERVER_ADDRESS=127.0.0.1
 ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/auth-backend/app.jar
 SuccessExitStatus=143
 Restart=on-failure

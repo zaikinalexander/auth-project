@@ -1,0 +1,7 @@
+# Ежедневный дамп базы authdb в 03:00, хранение 7 дней.
+# Восстановление: psql -U postgres authdb < /root/backups/authdb-YYYY-MM-DD.sql
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MAILTO=""
+
+0 3 * * * root mkdir -p /root/backups && sudo -u postgres pg_dump authdb > /root/backups/authdb-$(date +\%F).sql 2>>/var/log/authdb-backup.log && find /root/backups -maxdepth 1 -type f -name 'authdb-*.sql' -mtime +7 -delete >>/var/log/authdb-backup.log 2>&1
