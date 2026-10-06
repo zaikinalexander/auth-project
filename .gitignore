@@ -1,0 +1,10 @@
+# артефакты сборки
+backend/target/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# логи и локальные секреты
+*.log
+.env
+keys/

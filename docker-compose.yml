@@ -1,0 +1,38 @@
+# Локальная разработка: PostgreSQL + Redis одной командой.
+# Если образ postgres:18-alpine недоступен в репозитории,
+# замените тег на 17-alpine.
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: auth_postgres
+    environment:
+      POSTGRES_DB: authdb
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: dev_only_change_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authuser -d authdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: auth_redis
+    command: redis-server --requirepass dev_only_change_me --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a dev_only_change_me ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
