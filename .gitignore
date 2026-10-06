@@ -1,10 +1,9 @@
-# артефакты сборки
-backend/target/
-frontend/dist/
-frontend/node_modules/
+target/
 node_modules/
-
-# логи и локальные секреты
-*.log
-.env
+dist/
 keys/
+.env
+*.log
+.idea/
+.vscode/
+*.iml
