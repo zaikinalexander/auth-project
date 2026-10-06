@@ -1,7 +1,6 @@
 import axios from 'axios'
 
-// Хранилище access-токена. ТОЛЬКО в памяти страницы.
-// Никакого localStorage: при XSS токен не украсть.
+// Access-токен живёт только в памяти страницы: из localStorage его забрал бы любой XSS.
 export const authToken = { current: null }
 
 let unauthorizedHandler = null

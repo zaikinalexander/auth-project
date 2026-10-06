@@ -1,9 +1,6 @@
 package ru.seoniks.auth.dto;
 
-/**
- * ВАЖНО: refresh-токен НИКОГДА не попадает в JSON-тело.
- * Он передаётся только в HttpOnly Cookie.
- */
+// refresh-токен намеренно не входит в тело ответа и приходит только в HttpOnly Cookie.
 public record LoginResponse(
         String accessToken,
         UserDto user

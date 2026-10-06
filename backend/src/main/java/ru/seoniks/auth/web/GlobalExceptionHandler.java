@@ -69,20 +69,8 @@ public class GlobalExceptionHandler {
                 .body(Map.of("error", "Неподдерживаемый тип содержимого"));
     }
 
-    /**
-     * ОТКАЗ В ДОСТУПЕ -> 403.
-     *
-     * Method security (@PreAuthorize("@access.hasPage(#code)")) бросает
-     * AuthorizationDeniedException (наследник AccessDeniedException) ВНУТРИ
-     * DispatcherServlet. До ExceptionTranslationFilter и его accessDeniedHandler
-     * такое исключение не доходит: его перехватывает @RestControllerAdvice.
-     * Без этого метода catch-all ниже превращал отказ в доступе в 500.
-     *
-     * Симптом до правки:
-     *   GET /api/pages/TEST_PAGE_2 под ролью USER -> 500 {"error":"Внутренняя ошибка сервера"}
-     * После правки:
-     *   GET /api/pages/TEST_PAGE_2 под ролью USER -> 403 {"error":"Forbidden"}
-     */
+    // Отказ от @PreAuthorize возникает внутри DispatcherServlet и не доходит до
+    // accessDeniedHandler, поэтому без этого метода catch-all ниже вернул бы 500.
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Map<String, String>> handleAccessDenied(AccessDeniedException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)

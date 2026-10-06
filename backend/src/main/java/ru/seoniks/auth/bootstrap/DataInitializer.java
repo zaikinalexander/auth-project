@@ -14,10 +14,7 @@ import ru.seoniks.auth.repo.UserRepository;
 
 import java.util.HashSet;
 
-/**
- * При первом запуске создаёт администратора, если пользователей нет.
- * Пароль берётся из переменной окружения ADMIN_INITIAL_PASSWORD.
- */
+// Создаёт администратора из ADMIN_INITIAL_PASSWORD, и только при пустой таблице users.
 @Configuration
 public class DataInitializer {
 

@@ -23,10 +23,7 @@ public class PageController {
                     "Содержимое третьей тестовой страницы. Доступ выдан администратором.")
     );
 
-    /**
-     * Доступ проверяется на бэкенде по правам из JWT-контекста.
-     * Фронтенд лишь скрывает ссылки, но не защищает данные.
-     */
+    // Право проверяется здесь: фронтенд только прячет ссылки и данные не защищает.
     @GetMapping("/{code}")
     @PreAuthorize("@access.hasPage(#code)")
     public PageContentDto getPage(@PathVariable String code) {

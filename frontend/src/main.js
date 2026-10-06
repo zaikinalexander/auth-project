@@ -10,8 +10,7 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 
-// Если access-токен протух, а refresh недействителен,
-// interceptor Axios дёрнет этот обработчик и уведёт на /login.
+// При протухшем access и недействительном refresh перехватчик Axios уведёт на /login.
 useAuthStore(pinia).installUnauthorizedHandler(router)
 
 app.mount('#app')

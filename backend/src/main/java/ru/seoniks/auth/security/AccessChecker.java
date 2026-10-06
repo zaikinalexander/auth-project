@@ -5,11 +5,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
-/**
- * Проверка доступа к страницам. Вызывается из контроллеров
- * через @PreAuthorize("@access.hasPage('TEST_PAGE_1')").
- * ADMIN имеет доступ ко всем страницам всегда.
- */
+// Бин для @PreAuthorize("@access.hasPage(...)"); ADMIN проходит на любую страницу.
 @Component("access")
 public class AccessChecker {
 

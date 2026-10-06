@@ -7,10 +7,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Защита от перебора паролей: не более loginMaxAttempts неудачных попыток
- * за loginWindow для связки "IP + email".
- */
+// Не более loginMaxAttempts неудач за loginWindow на связку IP+email.
+// Счётчики живут в памяти JVM и обнуляются при рестарте — для одного инстанса этого хватает.
 @Component
 public class LoginRateLimiter {
 

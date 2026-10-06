@@ -8,10 +8,7 @@ import ru.seoniks.auth.config.AppProperties;
 
 import java.time.Duration;
 
-/**
- * Refresh-токен живёт только в HttpOnly + Secure + SameSite=Strict cookie
- * с узким path=/api/auth, чтобы не утекать на другие маршруты.
- */
+// HttpOnly, Secure, SameSite=Strict и узкий path=/api/auth — токен не уходит на другие маршруты.
 @Component
 public class CookieFactory {
 
