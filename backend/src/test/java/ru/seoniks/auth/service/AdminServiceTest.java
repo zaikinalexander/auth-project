@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import ru.seoniks.auth.domain.AuditEvent;
 import ru.seoniks.auth.domain.Page;
 import ru.seoniks.auth.domain.Role;
 import ru.seoniks.auth.domain.User;
@@ -25,9 +26,14 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,6 +50,9 @@ class AdminServiceTest {
     @Mock
     PasswordEncoder encoder;
 
+    @Mock
+    AuditService audit;
+
     @InjectMocks
     AdminService service;
 
@@ -54,29 +63,33 @@ class AdminServiceTest {
         ApiException e = assertThrows(ApiException.class, () -> service.delete(id, id));
 
         assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
-        verify(users, never()).deleteById(any(UUID.class));
+        verify(users, never()).delete(any(User.class));
+        verifyNoInteractions(audit);
     }
 
     @Test
-    void deleteOtherUserSucceeds() {
+    void deleteOtherUserSucceedsAndIsAudited() {
         UUID target = UUID.randomUUID();
-        UUID current = UUID.randomUUID();
-        when(users.existsById(target)).thenReturn(true);
+        User victim = user(target, "victim@seoniks.ru", Role.USER);
+        when(users.findWithPagesById(target)).thenReturn(Optional.of(victim));
 
-        service.delete(target, current);
+        service.delete(target, UUID.randomUUID());
 
-        verify(users).deleteById(target);
+        verify(users).delete(victim);
+        verify(audit).record(eq(AuditEvent.ADMIN_USER_DELETE), eq(true),
+                eq("victim@seoniks.ru"), anyMap());
     }
 
     @Test
     void deleteUnknownUserGives404() {
         UUID target = UUID.randomUUID();
-        when(users.existsById(target)).thenReturn(false);
+        when(users.findWithPagesById(target)).thenReturn(Optional.empty());
 
         ApiException e = assertThrows(ApiException.class,
                 () -> service.delete(target, UUID.randomUUID()));
 
         assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+        verifyNoInteractions(audit);
     }
 
     @Test
@@ -151,6 +164,8 @@ class AdminServiceTest {
         assertThat(created.pages()).containsExactly("TEST_PAGE_1");
         assertThat(created.enabled()).isTrue();
         verify(users).save(any(User.class));
+        verify(audit).record(eq(AuditEvent.ADMIN_USER_CREATE), eq(true),
+                eq("new@seoniks.ru"), anyMap());
     }
 
     @Test

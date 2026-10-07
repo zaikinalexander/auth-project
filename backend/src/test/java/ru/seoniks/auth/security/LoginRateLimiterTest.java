@@ -13,7 +13,7 @@ class LoginRateLimiterTest {
 
     private LoginRateLimiter limiter(int maxAttempts, Duration window) {
         return new LoginRateLimiter(new AppProperties(
-                null, null, new AppProperties.Security(maxAttempts, window), null));
+                null, null, new AppProperties.Security(maxAttempts, window), null, null));
     }
 
     @Test

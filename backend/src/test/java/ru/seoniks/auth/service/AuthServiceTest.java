@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import ru.seoniks.auth.domain.AuditEvent;
 import ru.seoniks.auth.domain.Role;
 import ru.seoniks.auth.domain.User;
 import ru.seoniks.auth.dto.LoginRequest;
@@ -23,7 +24,11 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -52,6 +57,9 @@ class AuthServiceTest {
     @Mock
     LoginRateLimiter rateLimiter;
 
+    @Mock
+    AuditService audit;
+
     @InjectMocks
     AuthService service;
 
@@ -68,6 +76,8 @@ class AuthServiceTest {
         verify(rateLimiter).registerFailure(KEY);
         verify(rateLimiter, never()).reset(anyString());
         verifyNoInteractions(refreshStore);
+        verify(audit).record(eq(AuditEvent.AUTH_LOGIN_FAIL), eq(false), eq(EMAIL),
+                anyMap(), eq(EMAIL), isNull());
     }
 
     @Test
@@ -122,6 +132,8 @@ class AuthServiceTest {
         assertThat(result.user().email()).isEqualTo(EMAIL);
         assertThat(result.user().role()).isEqualTo(Role.ADMIN);
         verify(rateLimiter).reset(KEY);
+        verify(audit).record(eq(AuditEvent.AUTH_LOGIN_SUCCESS), eq(true), eq(EMAIL),
+                anyMap(), eq(EMAIL), eq("ADMIN"));
     }
 
     @Test
@@ -170,6 +182,7 @@ class AuthServiceTest {
         assertThat(service.refresh("bad-token")).isEmpty();
 
         verifyNoInteractions(users, jwtService);
+        verify(audit).record(eq(AuditEvent.AUTH_REFRESH_INVALID), eq(false), isNull(), isNull());
     }
 
     @Test
@@ -180,6 +193,7 @@ class AuthServiceTest {
         assertThat(service.refresh("stolen-token")).isEmpty();
 
         verifyNoInteractions(users, jwtService);
+        verify(audit).record(eq(AuditEvent.AUTH_REFRESH_REUSE), eq(false), isNull(), isNull());
     }
 
     @Test

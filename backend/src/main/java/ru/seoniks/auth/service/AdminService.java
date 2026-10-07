@@ -3,6 +3,7 @@ package ru.seoniks.auth.service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import ru.seoniks.auth.domain.AuditEvent;
 import ru.seoniks.auth.domain.Page;
 import ru.seoniks.auth.domain.User;
 import ru.seoniks.auth.dto.CreateUserRequest;
@@ -13,7 +14,10 @@ import ru.seoniks.auth.repo.PageRepository;
 import ru.seoniks.auth.repo.UserRepository;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -23,11 +27,16 @@ public class AdminService {
     private final UserRepository users;
     private final PageRepository pages;
     private final PasswordEncoder encoder;
+    private final AuditService audit;
 
-    public AdminService(UserRepository users, PageRepository pages, PasswordEncoder encoder) {
+    public AdminService(UserRepository users,
+                        PageRepository pages,
+                        PasswordEncoder encoder,
+                        AuditService audit) {
         this.users = users;
         this.pages = pages;
         this.encoder = encoder;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -49,7 +58,13 @@ public class AdminService {
         user.setEnabled(true);
         user.setPages(loadPages(request.pages()));
 
-        return UserDto.from(users.save(user));
+        UserDto created = UserDto.from(users.save(user));
+        // В details уходят только email, роль и коды страниц — пароль и его хеш никогда.
+        audit.record(AuditEvent.ADMIN_USER_CREATE, true, created.email(),
+                Map.of("email", created.email(),
+                        "role", created.role().name(),
+                        "pages", created.pages()));
+        return created;
     }
 
     @Transactional
@@ -62,20 +77,45 @@ public class AdminService {
                     "Нельзя изменить собственную роль или статус");
         }
 
+        String roleBefore = user.getRole() == null ? null : user.getRole().name();
+        boolean enabledBefore = user.isEnabled();
+
         if (request.role() != null) {
             user.setRole(request.role());
         }
         if (request.enabled() != null) {
             user.setEnabled(request.enabled());
         }
-        return UserDto.from(user);
+
+        Map<String, String> changes = new LinkedHashMap<>();
+        String roleAfter = user.getRole() == null ? null : user.getRole().name();
+        if (request.role() != null && !Objects.equals(roleBefore, roleAfter)) {
+            changes.put("role", roleBefore + " -> " + roleAfter);
+        }
+        if (request.enabled() != null && enabledBefore != user.isEnabled()) {
+            changes.put("enabled", enabledBefore + " -> " + user.isEnabled());
+        }
+
+        UserDto updated = UserDto.from(user);
+        audit.record(AuditEvent.ADMIN_USER_UPDATE, true, updated.email(),
+                Map.of("targetEmail", updated.email(), "changes", changes));
+        return updated;
     }
 
     @Transactional
     public UserDto assignPages(UUID id, List<String> pageCodes, UUID currentUserId) {
         User user = requireUser(id);
+        List<String> before = sortedCodes(user.getPages());
+
         user.setPages(loadPages(pageCodes));
-        return UserDto.from(user);
+
+        List<String> after = sortedCodes(user.getPages());
+        UserDto updated = UserDto.from(user);
+        audit.record(AuditEvent.ADMIN_USER_PAGES, true, updated.email(),
+                Map.of("targetEmail", updated.email(),
+                        "pagesBefore", before,
+                        "pagesAfter", after));
+        return updated;
     }
 
     @Transactional
@@ -83,10 +123,10 @@ public class AdminService {
         if (id.equals(currentUserId)) {
             throw ApiException.badRequest("Нельзя удалить собственную учётную запись");
         }
-        if (!users.existsById(id)) {
-            throw ApiException.notFound("Пользователь не найден");
-        }
-        users.deleteById(id);
+        User user = requireUser(id);
+        users.delete(user);
+        audit.record(AuditEvent.ADMIN_USER_DELETE, true, user.getEmail(),
+                Map.of("targetEmail", user.getEmail()));
     }
 
     private User requireUser(UUID id) {
@@ -104,5 +144,9 @@ public class AdminService {
             throw ApiException.badRequest("Один или несколько кодов страниц неизвестны");
         }
         return new HashSet<>(found);
+    }
+
+    private static List<String> sortedCodes(Set<Page> source) {
+        return source.stream().map(Page::getCode).sorted().toList();
     }
 }

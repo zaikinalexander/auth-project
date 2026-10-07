@@ -1,0 +1,18 @@
+package ru.seoniks.auth.domain;
+
+public enum AuditEvent {
+    AUTH_LOGIN_SUCCESS,
+    AUTH_LOGIN_FAIL,
+    AUTH_LOGOUT,
+    AUTH_REFRESH_OK,
+    AUTH_REFRESH_REUSE,
+    AUTH_REFRESH_INVALID,
+    RATE_LIMIT_HIT,
+    ADMIN_USER_CREATE,
+    ADMIN_USER_UPDATE,
+    ADMIN_USER_PAGES,
+    ADMIN_USER_DELETE,
+    PAGE_VIEW,
+    PAGE_DENIED,
+    AUDIT_READ
+}

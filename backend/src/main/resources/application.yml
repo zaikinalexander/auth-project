@@ -36,3 +36,5 @@ app:
   admin:
     initial-email: ${ADMIN_EMAIL:admin@seoniks.ru}
     initial-password: ${ADMIN_INITIAL_PASSWORD:}
+  audit:
+    retention-days: ${AUDIT_RETENTION_DAYS:90}

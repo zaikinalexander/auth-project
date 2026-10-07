@@ -10,7 +10,8 @@ public record AppProperties(
         Jwt jwt,
         Refresh refresh,
         Security security,
-        Admin admin
+        Admin admin,
+        Audit audit
 ) {
     public record Jwt(
             Path privateKeyPath,
@@ -32,5 +33,9 @@ public record AppProperties(
     public record Admin(
             String initialEmail,
             String initialPassword
+    ) {}
+
+    public record Audit(
+            int retentionDays
     ) {}
 }

@@ -88,7 +88,7 @@ class JwtServiceTest {
         Path publicKey = writePem("public-" + ttl.toMillis() + "-" + pair.hashCode() + ".pem",
                 "PUBLIC KEY", pair.getPublic().getEncoded());
         return new JwtService(new AppProperties(
-                new AppProperties.Jwt(privateKey, publicKey, ttl), null, null, null));
+                new AppProperties.Jwt(privateKey, publicKey, ttl), null, null, null, null));
     }
 
     private Path writePem(String name, String label, byte[] der) throws IOException {
