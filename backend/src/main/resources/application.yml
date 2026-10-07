@@ -20,6 +20,11 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # Redis используется только через StringRedisTemplate, репозитории не нужны.
+      # Без этого Spring Data при старте перебирает JPA-репозитории как кандидатов
+      # и пишет INFO о невозможности определить хранилище.
+      repositories:
+        enabled: false
 
 app:
   jwt:
