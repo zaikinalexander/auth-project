@@ -242,6 +242,51 @@ public class RefreshTokenStore {
         return revoked;
     }
 
+    // Семьи, созданные до появления метаданных, не видны в списке сессий и их
+    // нельзя оборвать через «все сессии пользователя», потому что индекс usr: их не
+    // знает. Метод восстанавливает ses:/usr:/ses:index по уже лежащим в Redis
+    // записям rt:. Вызывается один раз при старте приложения.
+    public int backfillSessions(java.util.function.Function<UUID, String> emailResolver) {
+        Set<String> familyKeys = redis.keys(FAM + "*");
+        if (familyKeys == null || familyKeys.isEmpty()) {
+            return 0;
+        }
+        int created = 0;
+        for (String familyKey : familyKeys) {
+            String family = familyKey.substring(FAM.length());
+            if (Boolean.TRUE.equals(redis.hasKey(SES + family))) {
+                continue;
+            }
+            Set<String> hashes = redis.opsForSet().members(familyKey);
+            if (hashes == null || hashes.isEmpty()) {
+                continue;
+            }
+            UUID userId = null;
+            for (String hash : hashes) {
+                String json = redis.opsForValue().get(RT + hash);
+                if (json != null) {
+                    userId = read(json).userId();
+                    break;
+                }
+            }
+            if (userId == null) {
+                // живых токенов в семье нет, она доживёт по своему TTL
+                continue;
+            }
+            String email = null;
+            try {
+                email = emailResolver.apply(userId);
+            } catch (RuntimeException e) {
+                log.warn("Не удалось подобрать email для сессии {}: {}", family, e.toString());
+            }
+            // Время создания неизвестно, поэтому берём текущее: важнее, чтобы
+            // сессию можно было увидеть и оборвать.
+            writeSession(family, userId, email, Instant.now(), Instant.now(), null, null);
+            created++;
+        }
+        return created;
+    }
+
     // ------------------------------------------------------------------ внутреннее
 
     private void put(UUID userId, String family, String token) {
