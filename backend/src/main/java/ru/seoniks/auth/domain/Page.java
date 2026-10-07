@@ -1,8 +1,14 @@
 package ru.seoniks.auth.domain;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.time.Instant;
 
 @Entity
 @Table(name = "pages")
@@ -11,12 +17,22 @@ import lombok.Setter;
 public class Page {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(nullable = false, unique = true, length = 64)
+    @Column(length = 64, nullable = false)
     private String code;
 
-    @Column(nullable = false, length = 128)
+    @Column(nullable = false, length = 200)
     private String title;
+
+    @Column(columnDefinition = "text")
+    private String content;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+    }
 }

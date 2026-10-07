@@ -6,7 +6,11 @@ import ru.seoniks.auth.domain.Page;
 import java.util.Collection;
 import java.util.List;
 
-public interface PageRepository extends JpaRepository<Page, Long> {
+public interface PageRepository extends JpaRepository<Page, String> {
 
     List<Page> findByCodeIn(Collection<String> codes);
+
+    List<Page> findAllByOrderByCodeAsc();
+
+    boolean existsByCode(String code);
 }

@@ -42,7 +42,7 @@ public class User {
     @JoinTable(
             name = "user_pages",
             joinColumns = @JoinColumn(name = "user_id"),
-            inverseJoinColumns = @JoinColumn(name = "page_id"))
+            inverseJoinColumns = @JoinColumn(name = "page_code"))
     private Set<Page> pages = new HashSet<>();
 
     @PrePersist
