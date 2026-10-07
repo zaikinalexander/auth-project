@@ -48,6 +48,7 @@
             <td>{{ user.pages.join(', ') || '—' }}</td>
             <td>
               <button class="primary" @click="startEdit(user)">Изменить</button>
+              <button @click="revokeSessions(user)">Оборвать сессии</button>
               <button class="danger" @click="removeUser(user)">Удалить</button>
             </td>
           </tr>
@@ -88,7 +89,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { http } from '../api/http'
 
-const allPages = ['TEST_PAGE_1', 'TEST_PAGE_2', 'TEST_PAGE_3']
+const allPages = ref([])
 const MIN_PASSWORD_LENGTH = 10
 const MAX_PASSWORD_LENGTH = 128
 
@@ -149,6 +150,7 @@ async function createUser() {
     createForm.role = 'USER'
     createForm.pages = []
     await load()
+    await loadPages()
   } catch (e) {
     createError.value = errorMessage(e, 'Не удалось создать пользователя')
   }
@@ -179,6 +181,23 @@ async function saveEdit() {
   }
 }
 
+// Обрывает все refresh-токены пользователя. Access-токены доживают свои
+// 15 минут: они stateless и по хранилищу не проверяются.
+async function revokeSessions(user) {
+  const warning = 'Оборвать все активные сессии ' + user.email + '?\n\n'
+    + 'Устройствам придётся войти заново. Доступ, уже открытый выданным\n'
+    + 'access-токеном, сохранится не дольше 15 минут.'
+  if (!window.confirm(warning)) return
+  try {
+    const { data } = await http.delete('/admin/users/' + user.id + '/sessions')
+    window.alert('Оборвано сессий: ' + (data && data.revoked !== undefined ? data.revoked : 0))
+  } catch (e) {
+    error.value = e.response && e.response.data && e.response.data.error
+      ? e.response.data.error
+      : 'Не удалось оборвать сессии'
+  }
+}
+
 async function removeUser(user) {
   if (!window.confirm('Удалить пользователя ' + user.email + '?')) {
     return
@@ -194,5 +213,16 @@ async function removeUser(user) {
   }
 }
 
-onMounted(load)
+async function loadPages() {
+  try {
+    allPages.value = (await http.get('/admin/pages')).data.map((p) => p.code)
+  } catch (e) {
+    allPages.value = []
+  }
+}
+
+onMounted(() => {
+  load()
+  loadPages()
+})
 </script>

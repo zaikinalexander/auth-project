@@ -3,12 +3,13 @@
     <header v-if="auth.isAuthenticated" class="topbar">
       <nav>
         <router-link v-if="auth.isAdmin" to="/admin/users">Пользователи</router-link>
+        <router-link v-if="auth.isAdmin" to="/admin/pages">Страницы</router-link>
+        <router-link v-if="auth.isAdmin" to="/admin/sessions">Сессии</router-link>
         <router-link v-if="auth.isAdmin" to="/admin/audit">Журнал</router-link>
-        <template v-for="code in allPages" :key="code">
-          <router-link v-if="auth.hasPage(code)" :to="'/pages/' + code">
-            {{ code }}
-          </router-link>
-        </template>
+        <router-link v-for="code in menuPages" :key="code" :to="'/page/' + code">
+          {{ code }}
+        </router-link>
+        <router-link class="right" to="/profile">Профиль</router-link>
         <button class="logout" @click="logout">Выйти</button>
       </nav>
     </header>
@@ -19,12 +20,40 @@
 </template>
 
 <script setup>
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { http } from './api/http'
 import { useAuthStore } from './stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
-const allPages = ['TEST_PAGE_1', 'TEST_PAGE_2', 'TEST_PAGE_3']
+
+// Каталог страниц больше не зашит в код: администратору показываем все
+// страницы из справочника, остальным — только выданные им коды.
+const catalog = ref([])
+
+const menuPages = computed(() => {
+  if (!auth.isAuthenticated) return []
+  if (auth.isAdmin && catalog.value.length) {
+    return catalog.value.map((p) => p.code)
+  }
+  return auth.pages
+})
+
+async function loadCatalog() {
+  if (!auth.isAdmin) {
+    catalog.value = []
+    return
+  }
+  try {
+    catalog.value = (await http.get('/admin/pages')).data
+  } catch (e) {
+    catalog.value = []
+  }
+}
+
+onMounted(loadCatalog)
+watch(() => auth.isAuthenticated, loadCatalog)
 
 async function logout() {
   await auth.logout()
@@ -57,8 +86,10 @@ body {
   color: #ffffff;
   font-weight: 600;
 }
-.logout {
+.topbar a.right {
   margin-left: auto;
+}
+.logout {
   background: #3e4c59;
   color: #ffffff;
   border: 0;
