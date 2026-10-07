@@ -34,16 +34,24 @@ public class JwtService {
         this.accessTokenTtl = props.jwt().accessTokenTtl();
     }
 
-    public String issueAccessToken(UUID userId, String role) {
+    public record IssuedToken(String token, String jti) {}
+
+    public IssuedToken issue(UUID userId, String role) {
         Instant now = Instant.now();
-        return Jwts.builder()
+        String jti = UUID.randomUUID().toString();
+        String token = Jwts.builder()
                 .subject(userId.toString())
                 .claim("role", role)
-                .id(UUID.randomUUID().toString())
+                .id(jti)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTokenTtl)))
                 .signWith(privateKey, Jwts.SIG.RS256)
                 .compact();
+        return new IssuedToken(token, jti);
+    }
+
+    public String issueAccessToken(UUID userId, String role) {
+        return issue(userId, role).token();
     }
 
     public Claims parseAccessToken(String token) {

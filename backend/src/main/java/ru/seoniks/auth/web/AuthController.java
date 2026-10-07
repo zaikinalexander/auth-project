@@ -4,9 +4,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+import ru.seoniks.auth.dto.ChangePasswordRequest;
 import ru.seoniks.auth.dto.LoginRequest;
 import ru.seoniks.auth.dto.LoginResponse;
 import ru.seoniks.auth.dto.UserDto;
@@ -33,7 +40,8 @@ public class AuthController {
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request,
                                                HttpServletRequest httpRequest,
                                                HttpServletResponse httpResponse) {
-        AuthService.LoginResult result = authService.login(request, httpRequest.getRemoteAddr());
+        AuthService.LoginResult result =
+                authService.login(request, httpRequest.getRemoteAddr(), userAgent(httpRequest));
         httpResponse.addHeader(HttpHeaders.SET_COOKIE, cookies.create(result.refreshToken()).toString());
         return ResponseEntity.ok(new LoginResponse(result.accessToken(), result.user()));
     }
@@ -46,7 +54,7 @@ public class AuthController {
             throw ApiException.unauthorized("Требуется вход");
         }
 
-        return authService.refresh(token)
+        return authService.refresh(token, httpRequest.getRemoteAddr(), userAgent(httpRequest))
                 .map(result -> {
                     httpResponse.addHeader(HttpHeaders.SET_COOKIE,
                             cookies.create(result.newRefreshToken()).toString());
@@ -69,5 +77,20 @@ public class AuthController {
     @GetMapping("/me")
     public UserDto me(@AuthenticationPrincipal UUID userId) {
         return authService.me(userId);
+    }
+
+    @PostMapping("/password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void changePassword(@Valid @RequestBody ChangePasswordRequest request,
+                               @AuthenticationPrincipal UUID userId,
+                               HttpServletResponse httpResponse) {
+        authService.changePassword(userId, request.currentPassword(), request.newPassword());
+        // Все refresh-токены отозваны, поэтому cookie гасим сразу: иначе браузер
+        // носил бы заведомо мёртвый токен и получал 401 на каждом обновлении.
+        httpResponse.addHeader(HttpHeaders.SET_COOKIE, cookies.expire().toString());
+    }
+
+    private static String userAgent(HttpServletRequest request) {
+        return request.getHeader(HttpHeaders.USER_AGENT);
     }
 }

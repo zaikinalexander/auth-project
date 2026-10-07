@@ -38,7 +38,8 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
-                .requestMatchers("/api/auth/logout", "/api/auth/me").authenticated()
+                .requestMatchers("/api/auth/logout", "/api/auth/me", "/api/auth/password").authenticated()
+                .requestMatchers("/api/me/**").authenticated()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/pages/**").authenticated()
                 .anyRequest().denyAll())

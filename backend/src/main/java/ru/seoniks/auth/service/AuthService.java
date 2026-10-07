@@ -4,6 +4,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.seoniks.auth.domain.AuditEvent;
+import ru.seoniks.auth.domain.User;
 import ru.seoniks.auth.dto.LoginRequest;
 import ru.seoniks.auth.dto.UserDto;
 import ru.seoniks.auth.error.ApiException;
@@ -45,7 +46,7 @@ public class AuthService {
     }
 
     @Transactional(readOnly = true)
-    public LoginResult login(LoginRequest request, String clientIp) {
+    public LoginResult login(LoginRequest request, String clientIp, String userAgent) {
         String email = request.email().toLowerCase().trim();
         String limitKey = clientIp + "|" + email;
 
@@ -78,17 +79,19 @@ public class AuthService {
 
         rateLimiter.reset(limitKey);
 
-        String accessToken = jwtService.issueAccessToken(user.getId(), user.getRole().name());
-        String refreshToken = refreshStore.create(user.getId());
+        JwtService.IssuedToken issued = jwtService.issue(user.getId(), user.getRole().name());
+        RefreshTokenStore.IssuedRefresh refresh =
+                refreshStore.create(user.getId(), user.getEmail(), clientIp, userAgent);
+        refreshStore.bindAccessToken(issued.jti(), refresh.familyId());
         audit.record(AuditEvent.AUTH_LOGIN_SUCCESS, true, email,
                 Map.of("email", email, "role", user.getRole().name()),
                 email, user.getRole().name());
-        return new LoginResult(accessToken, refreshToken, UserDto.from(user));
+        return new LoginResult(issued.token(), refresh.token(), UserDto.from(user));
     }
 
     @Transactional(readOnly = true)
-    public Optional<RefreshResult> refresh(String refreshToken) {
-        RefreshTokenStore.RotateResult rotated = refreshStore.rotate(refreshToken);
+    public Optional<RefreshResult> refresh(String refreshToken, String clientIp, String userAgent) {
+        RefreshTokenStore.RotateResult rotated = refreshStore.rotate(refreshToken, clientIp, userAgent);
 
         if (rotated.status() == RefreshTokenStore.RotateStatus.REUSE) {
             audit.record(AuditEvent.AUTH_REFRESH_REUSE, false, null, null);
@@ -102,15 +105,16 @@ public class AuthService {
         return users.findWithPagesById(rotated.userId())
                 .filter(u -> u.isEnabled())
                 .map(user -> {
-                    String accessToken =
-                            jwtService.issueAccessToken(user.getId(), user.getRole().name());
+                    JwtService.IssuedToken issued =
+                            jwtService.issue(user.getId(), user.getRole().name());
+                    refreshStore.bindAccessToken(issued.jti(), rotated.familyId());
                     audit.record(AuditEvent.AUTH_REFRESH_OK, true, user.getEmail(),
                             Map.of("email", user.getEmail(), "role", user.getRole().name()),
                             user.getEmail(), user.getRole().name());
-                    return new RefreshResult(accessToken, rotated.newToken());
+                    return new RefreshResult(issued.token(), rotated.newToken());
                 })
                 .or(() -> {
-                    // пользователь удалён/отключён между ротацией и проверкой
+                    // пользователь удалён или отключён между ротацией и проверкой
                     refreshStore.revoke(rotated.newToken());
                     audit.record(AuditEvent.AUTH_REFRESH_INVALID, false, null,
                             Map.of("reason", "user_inactive"));
@@ -121,6 +125,34 @@ public class AuthService {
     public void logout(String refreshToken) {
         refreshStore.revoke(refreshToken);
         audit.record(AuditEvent.AUTH_LOGOUT, true, null, null);
+    }
+
+    // Смена собственного пароля обрывает все сессии пользователя: раз пароль меняют,
+    // прежний считается скомпрометированным. Access-токены доживают свои 15 минут,
+    // они stateless и по хранилищу не проверяются.
+    @Transactional
+    public void changePassword(UUID userId, String currentPassword, String newPassword) {
+        User user = users.findById(userId)
+                .orElseThrow(() -> ApiException.unauthorized("Сессия недействительна"));
+
+        if (!encoder.matches(currentPassword, user.getPasswordHash())) {
+            audit.record(AuditEvent.AUTH_PASSWORD_CHANGE_FAIL, false, user.getEmail(),
+                    Map.of("email", user.getEmail(), "reason", "bad_credentials"),
+                    user.getEmail(), user.getRole().name());
+            throw ApiException.badRequest("Текущий пароль неверен");
+        }
+        if (currentPassword.equals(newPassword)) {
+            throw ApiException.badRequest("Новый пароль совпадает с текущим");
+        }
+
+        user.setPasswordHash(encoder.encode(newPassword));
+        users.save(user);
+
+        int revoked = refreshStore.revokeAllForUser(userId);
+        // В журнал попадает только факт смены и число оборванных сессий, значения паролей не пишутся.
+        audit.record(AuditEvent.AUTH_PASSWORD_CHANGED, true, user.getEmail(),
+                Map.of("email", user.getEmail(), "revoked", revoked),
+                user.getEmail(), user.getRole().name());
     }
 
     @Transactional(readOnly = true)
