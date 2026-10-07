@@ -152,7 +152,7 @@ class AdminServiceTest {
     @Test
     void createStoresArgonHashAndNormalizesEmail() {
         when(users.findByEmail("new@seoniks.ru")).thenReturn(Optional.empty());
-        when(pages.findByCodeIn(anyCollection())).thenReturn(List.of(page(1L, "TEST_PAGE_1")));
+        when(pages.findByCodeIn(anyCollection())).thenReturn(List.of(page("TEST_PAGE_1")));
         when(encoder.encode(PASSWORD)).thenReturn("$argon2id$stub");
         when(users.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -172,9 +172,9 @@ class AdminServiceTest {
     void assignPagesReplacesWholeSet() {
         UUID id = UUID.randomUUID();
         User target = user(id, "u@seoniks.ru", Role.USER);
-        target.getPages().add(page(1L, "TEST_PAGE_1"));
+        target.getPages().add(page("TEST_PAGE_1"));
         when(users.findWithPagesById(id)).thenReturn(Optional.of(target));
-        when(pages.findByCodeIn(anyCollection())).thenReturn(List.of(page(2L, "TEST_PAGE_2")));
+        when(pages.findByCodeIn(anyCollection())).thenReturn(List.of(page("TEST_PAGE_2")));
 
         UserDto updated = service.assignPages(id, List.of("TEST_PAGE_2"), UUID.randomUUID());
 
@@ -192,9 +192,8 @@ class AdminServiceTest {
         return u;
     }
 
-    private static Page page(Long id, String code) {
+    private static Page page(String code) {
         Page p = new Page();
-        p.setId(id);
         p.setCode(code);
         p.setTitle(code);
         return p;
