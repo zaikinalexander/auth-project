@@ -51,7 +51,8 @@ public class AuditService {
     // Единственные ключи, которым разрешено попасть в details.
     static final Set<String> ALLOWED_DETAILS = Set.of(
             "reason", "email", "targetEmail", "role", "pages",
-            "pagesBefore", "pagesAfter", "changes", "code", "count");
+            "pagesBefore", "pagesAfter", "changes", "code", "count",
+            "title", "familyId", "revoked");
 
     // Второй барьер поверх белого списка: ключ с таким фрагментом отбрасывается
     // всегда, даже если его по ошибке добавят в ALLOWED_DETAILS.

@@ -6,8 +6,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ru.seoniks.auth.domain.AuditEvent;
+import ru.seoniks.auth.domain.Page;
 import ru.seoniks.auth.dto.PageContentDto;
 import ru.seoniks.auth.error.ApiException;
+import ru.seoniks.auth.repo.PageRepository;
 import ru.seoniks.auth.service.AuditService;
 
 import java.util.Map;
@@ -16,18 +18,11 @@ import java.util.Map;
 @RequestMapping("/api/pages")
 public class PageController {
 
-    private static final Map<String, PageContentDto> PAGES = Map.of(
-            "TEST_PAGE_1", new PageContentDto("TEST_PAGE_1", "Тестовая страница 1",
-                    "Содержимое первой тестовой страницы. Доступ выдан администратором."),
-            "TEST_PAGE_2", new PageContentDto("TEST_PAGE_2", "Тестовая страница 2",
-                    "Содержимое второй тестовой страницы. Доступ выдан администратором."),
-            "TEST_PAGE_3", new PageContentDto("TEST_PAGE_3", "Тестовая страница 3",
-                    "Содержимое третьей тестовой страницы. Доступ выдан администратором.")
-    );
-
+    private final PageRepository pages;
     private final AuditService audit;
 
-    public PageController(AuditService audit) {
+    public PageController(PageRepository pages, AuditService audit) {
+        this.pages = pages;
         this.audit = audit;
     }
 
@@ -36,11 +31,9 @@ public class PageController {
     @GetMapping("/{code}")
     @PreAuthorize("@access.hasPage(#code)")
     public PageContentDto getPage(@PathVariable String code) {
-        PageContentDto page = PAGES.get(code);
-        if (page == null) {
-            throw ApiException.notFound("Страница не найдена");
-        }
+        Page page = pages.findById(code)
+                .orElseThrow(() -> ApiException.notFound("Страница не найдена"));
         audit.record(AuditEvent.PAGE_VIEW, true, code, Map.of("code", code));
-        return page;
+        return new PageContentDto(page.getCode(), page.getTitle(), page.getContent());
     }
 }
