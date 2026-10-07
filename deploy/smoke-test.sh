@@ -191,6 +191,126 @@ check "тело 429" "Слишком много попыток входа. По�
 check "реальный вход под ADMIN не заблокирован" 200 \
     "$(login "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$WORK/jar_z" "$WORK/lz.json")"
 
+# ---------------------------------------------------------------- аудит: доступ
+head_ "Журнал аудита: разграничение доступа"
+AUD='/api/admin/audit'
+check "GET $AUD без токена"  401 "$(code GET "$AUD")"
+check "GET $AUD под USER"    403 "$(code GET "$AUD" -H "Authorization: Bearer $TU")"
+check "GET $AUD под ADMIN"   200 "$(code GET "$AUD?size=5" -H "Authorization: Bearer $TA")"
+jq -e '.items | length > 0' < "$WORK/body" >/dev/null 2>&1 \
+  && ok "список событий непустой (total=$(jq -r '.total' < "$WORK/body"))" \
+  || bad "список событий непустой" ">0" "0"
+jq -e '.items[0] | has("ts") and has("event") and has("actorEmail") and has("ip") and has("success")' \
+  < "$WORK/body" >/dev/null 2>&1 \
+  && ok "в записи есть ts/event/actorEmail/ip/success" \
+  || bad "состав записи журнала" "полный" "неполный"
+
+head_ "Журнал аудита: события пишутся"
+FAILMAIL="smoke-fail-$RANDOM-$RANDOM@seoniks.ru"
+curl -s -o /dev/null -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$FAILMAIL\",\"password\":\"wrong-password-xyz\"}"
+sleep 1
+code GET "$AUD?event=AUTH_LOGIN_FAIL&actor=$FAILMAIL&size=5" -H "Authorization: Bearer $TA" >/dev/null
+N=$(jq -r '.total // 0' < "$WORK/body")
+[ "${N:-0}" -ge 1 ] && ok "AUTH_LOGIN_FAIL записан для $FAILMAIL (total=$N)" \
+                    || bad "AUTH_LOGIN_FAIL записан" ">=1" "$N"
+jq -e '.items[0].details.reason == "bad_credentials"' < "$WORK/body" >/dev/null 2>&1 \
+  && ok "в details причина bad_credentials" || bad "details.reason" "bad_credentials" "$(jq -c '.items[0].details' < "$WORK/body")"
+jq -e --arg e "$FAILMAIL" '.items[0].details.email == $e' < "$WORK/body" >/dev/null 2>&1 \
+  && ok "в details email неудачного входа" || bad "details.email" "$FAILMAIL" "$(jq -c '.items[0].details' < "$WORK/body")"
+AIP=$(jq -r '.items[0].ip // empty' < "$WORK/body")
+[ -n "$AIP" ] && ok "в событии записан IP ($AIP)" || bad "IP в событии" "не пусто" "пусто"
+
+TMPU="smoke-audit-$RANDOM-$RANDOM@seoniks.ru"; TMPP=$(openssl rand -hex 16)
+check "создан временный пользователь" 201 \
+  "$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/api/admin/users" \
+     -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$TMPU\",\"password\":\"$TMPP\",\"role\":\"USER\",\"pages\":[\"TEST_PAGE_1\"]}")"
+TMPID=$(jq -r '.id' < "$WORK/body")
+check "удалён временный пользователь" 204 "$(code DELETE "/api/admin/users/$TMPID" -H "Authorization: Bearer $TA")"
+sleep 1
+
+code GET "$AUD?event=ADMIN_USER_CREATE&size=20" -H "Authorization: Bearer $TA" >/dev/null
+jq -e --arg e "$TMPU" '[.items[] | select(.target == $e)] | length >= 1' < "$WORK/body" >/dev/null 2>&1 \
+  && ok "ADMIN_USER_CREATE записан для $TMPU" || bad "ADMIN_USER_CREATE" "есть" "нет"
+jq -e --arg e "$TMPU" --arg p "$TMPP" \
+   '(.items[] | select(.target == $e) | .details) as $d
+    | ($d.email == $e) and ($d.role == "USER") and ($d.pages == ["TEST_PAGE_1"])
+      and (($d | tostring) | contains($p) | not)' < "$WORK/body" >/dev/null 2>&1 \
+  && ok "details создания: email+role+pages, пароль отсутствует" \
+  || bad "details ADMIN_USER_CREATE" "email,role,pages без пароля" "$(jq -c --arg e "$TMPU" '.items[]|select(.target==$e)|.details' < "$WORK/body" | head -1)"
+
+code GET "$AUD?event=ADMIN_USER_DELETE&size=20" -H "Authorization: Bearer $TA" >/dev/null
+jq -e --arg e "$TMPU" '[.items[] | select(.target == $e)] | length >= 1' < "$WORK/body" >/dev/null 2>&1 \
+  && ok "ADMIN_USER_DELETE записан для $TMPU" || bad "ADMIN_USER_DELETE" "есть" "нет"
+
+code GET "$AUD?event=PAGE_DENIED&size=20" -H "Authorization: Bearer $TA" >/dev/null
+jq -e '[.items[] | select(.details.code == "TEST_PAGE_2")] | length >= 1' < "$WORK/body" >/dev/null 2>&1 \
+  && ok "PAGE_DENIED с кодом страницы в details" || bad "PAGE_DENIED" "есть" "нет"
+
+ST=$(code GET "$AUD?event=NO_SUCH_EVENT&size=5" -H "Authorization: Bearer $TA")
+check "неизвестное имя события не роняет запрос" 200 "$ST"
+
+# ---------------------------------------------------------------- T3: утечка
+head_ "T3: журнал не содержит секретов"
+SECRET='SuperSecret123!'
+LEAK="smoke-leak-$RANDOM-$RANDOM@seoniks.ru"
+curl -s -o "$WORK/body" -X POST "$BASE/api/admin/users" -H "Authorization: Bearer $TA" \
+     -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$LEAK\",\"password\":\"$SECRET\",\"role\":\"USER\",\"pages\":[\"TEST_PAGE_1\"]}" >/dev/null
+LEAKID=$(jq -r '.id' < "$WORK/body")
+curl -s -o /dev/null -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$LEAK\",\"password\":\"$SECRET\"}"
+curl -s -o /dev/null -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$LEAK\",\"password\":\"${SECRET}wrong\"}"
+sleep 1
+: > "$WORK/audit-dump.jsonl"
+PG=0
+while [ "$PG" -lt 20 ]; do
+  curl -s -H "Authorization: Bearer $TA" "$BASE$AUD?page=$PG&size=200" > "$WORK/page.json"
+  jq -c '.items[]' < "$WORK/page.json" >> "$WORK/audit-dump.jsonl" 2>/dev/null
+  GOT=$(jq -r '.items | length' < "$WORK/page.json" 2>/dev/null); GOT=${GOT:-0}
+  [ "$GOT" -lt 200 ] && break
+  PG=$((PG + 1))
+done
+DUMPED=$(wc -l < "$WORK/audit-dump.jsonl")
+echo "        выгружено записей журнала: $DUMPED"
+check "журнал выгружен непустым (иначе T3 ничего не доказывает)" "yes" \
+      "$([ "${DUMPED:-0}" -gt 0 ] && echo yes || echo no)"
+LEAKED=0
+for pat in "$SECRET" "${SECRET}wrong" 'argon2' 'accessToken' 'refresh_token=' 'Bearer ' 'password' 'eyJhbGciOiJSUzI1NiJ9'; do
+  C=$(grep -c -F -- "$pat" "$WORK/audit-dump.jsonl" 2>/dev/null); C=${C:-0}
+  printf '        %-24s совпадений: %s\n' "\"$pat\"" "$C"
+  [ "${C:-0}" -ne 0 ] && LEAKED=$((LEAKED + 1))
+done
+check "ни один секрет не встретился в журнале" 0 "$LEAKED"
+KEYS=$(jq -r '.details // {} | keys[]' "$WORK/audit-dump.jsonl" 2>/dev/null | sort -u | tr '\n' ' ')
+echo "        ключи details во всём журнале: $KEYS"
+FORB=$(echo "$KEYS" | tr ' ' '\n' | grep -icE 'password|token|secret|cookie|authorization|hash|credential|jwt|session' || true)
+check "в ключах details нет запрещённых слов" 0 "${FORB:-0}"
+curl -s -o /dev/null -X DELETE "$BASE/api/admin/users/$LEAKID" -H "Authorization: Bearer $TA"
+echo "        временный пользователь $LEAK удалён"
+
+# ---------------------------------------------------------------- T4: access-лог
+head_ "T4: USER не получил ни одной 200 от /api/admin/audit"
+ACCESS_LOG=/var/log/nginx/access.log
+if [ -r "$ACCESS_LOG" ]; then
+  MARK=$(wc -l < "$ACCESS_LOG")
+  for _ in 1 2 3; do
+    curl -s -o /dev/null "$BASE$AUD" -H "Authorization: Bearer $TU"
+  done
+  sleep 1
+  WINDOW=$(tail -n +"$((MARK + 1))" "$ACCESS_LOG" | grep "$AUD" || true)
+  HITS=$(printf '%s\n' "$WINDOW" | grep -c "$AUD" || true)
+  OK200=$(printf '%s\n' "$WINDOW" | awk '$9 == 200' | grep -c "$AUD" || true)
+  OK403=$(printf '%s\n' "$WINDOW" | awk '$9 == 403' | grep -c "$AUD" || true)
+  check "запросов USER к $AUD в окне"      3   "$HITS"
+  check "из них ответов 200"               0   "${OK200:-0}"
+  check "из них ответов 403"               3   "${OK403:-0}"
+else
+  echo "        $ACCESS_LOG недоступен — проверка T4 пропущена (запуск не на сервере)"
+fi
+
 # ---------------------------------------------------------------- итог
 echo
 echo "############################################################"
