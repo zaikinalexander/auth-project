@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -38,6 +39,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -336,6 +338,57 @@ class AuditServiceTest {
     void specIsBuiltForEveryFilterCombination() {
         assertThat(AuditService.buildSpec(null, null, null, null)).isNotNull();
         assertThat(AuditService.buildSpec("PAGE_VIEW", "owner", Instant.now(), Instant.now())).isNotNull();
+    }
+
+    // ------------------------------------------------------------------ очистка журнала
+
+    @Test
+    void clearRemovesEverythingThenWritesSingleAuditClearEvent() {
+        withRequest("203.0.113.9", "Mozilla/5.0 Admin");
+        UUID id = UUID.randomUUID();
+        when(users.findById(id)).thenReturn(Optional.of(user(id, "admin@seoniks.ru", Role.ADMIN)));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(id, null,
+                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+        when(repository.deleteAllEntries()).thenReturn(7);
+
+        int deleted = service.clear();
+
+        assertThat(deleted).isEqualTo(7);
+        InOrder order = inOrder(repository);
+        order.verify(repository).deleteAllEntries();
+        AuditLog saved = capture();
+        assertThat(saved.getEvent()).isEqualTo(AuditEvent.AUDIT_CLEAR);
+        assertThat(saved.getSuccess()).isTrue();
+        assertThat(saved.getDetails()).containsEntry("count", 7);
+        assertThat(saved.getActorEmail()).isEqualTo("admin@seoniks.ru");
+        assertThat(saved.getActorRole()).isEqualTo("ADMIN");
+        assertThat(saved.getIp()).isEqualTo("203.0.113.9");
+        assertThat(saved.getUserAgent()).isEqualTo("Mozilla/5.0 Admin");
+    }
+
+    @Test
+    void clearOnEmptyJournalStillLeavesTheAuditClearTrace() {
+        when(repository.deleteAllEntries()).thenReturn(0);
+
+        int deleted = service.clear();
+
+        assertThat(deleted).isZero();
+        AuditLog saved = capture();
+        assertThat(saved.getEvent()).isEqualTo(AuditEvent.AUDIT_CLEAR);
+        assertThat(saved.getDetails()).containsEntry("count", 0);
+    }
+
+    @Test
+    void clearEventCarriesNoSecrets() {
+        withRequest("203.0.113.9", "curl/8.5.0");
+        when(repository.deleteAllEntries()).thenReturn(3);
+
+        service.clear();
+
+        String whole = capture().toString();
+        assertThat(whole).doesNotContain(PASSWORD).doesNotContain(HASH)
+                .doesNotContain(ACCESS).doesNotContain(REFRESH);
     }
 
     // ------------------------------------------------------------------ утилиты

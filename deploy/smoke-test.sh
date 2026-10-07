@@ -12,8 +12,24 @@
 #
 #  Проверка ограничения попыток входа выполняется на отдельном адресе
 #  ratelimit-test@seoniks.ru, чтобы не блокировать реальные входы.
+#
+#  Флаг --clean-audit удаляет из audit_log следы тестовых учёток и прогонов
+#  с адреса самого сервера. Строки реальных пользователей, пришедшие с
+#  внешних адресов, не затрагиваются.
+#
+#  ВНИМАНИЕ: раздел «Очистка журнала» разрушающий — он стирает audit_log.
+#  Перед очисткой скрипт сам сохраняет снимок журнала в /root/backups,
+#  поэтому результат обратим. Путь снимка переопределяется AUDIT_SNAPSHOT.
 # =====================================================================
 set -uo pipefail
+
+CLEAN_AUDIT=0
+for arg in "$@"; do
+    case "$arg" in
+        --clean-audit) CLEAN_AUDIT=1 ;;
+        *) echo "Неизвестный аргумент: $arg"; exit 2 ;;
+    esac
+done
 
 BASE="${BASE:-https://app.seoniks.ru}"
 CRED_FILE="${CRED_FILE:-/root/app-credentials.txt}"
@@ -309,6 +325,146 @@ if [ -r "$ACCESS_LOG" ]; then
   check "из них ответов 403"               3   "${OK403:-0}"
 else
   echo "        $ACCESS_LOG недоступен — проверка T4 пропущена (запуск не на сервере)"
+fi
+
+# ---------------------------------------------------------------- CSRF
+head_ "CSRF: почему межсайтовая подделка запроса неприменима"
+login "$USER_EMAIL" "$USER_PASSWORD" "$WORK/jc" "$WORK/lc.json" >/dev/null
+TC="$(tok "$WORK/lc.json")"
+
+SC="$(curl -s -D - -o /dev/null -X POST "$BASE/api/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$USER_PASSWORD\"}" \
+      | grep -i '^set-cookie:' | tr -d '\r')"
+for attr in "HttpOnly" "Secure" "SameSite=Strict" "Path=/api/auth"; do
+    case "$SC" in *"$attr"*) ok "Set-Cookie refresh_token содержит $attr";;
+                  *) bad "Set-Cookie refresh_token содержит $attr" "есть" "нет";; esac
+done
+
+for ep in /api/auth/refresh /api/auth/logout; do
+    HDRS="$WORK/csrf-h"
+    curl -s -D "$HDRS" -o /dev/null -X POST "$BASE$ep" \
+         -H "Origin: https://evil.example" \
+         -H "Referer: https://evil.example/attack.html" \
+         -b "$WORK/jc" -H "Authorization: Bearer $TC"
+    ACAO=$(grep -ci '^access-control-allow-origin:' "$HDRS" 2>/dev/null); ACAO=${ACAO:-0}
+    ACAC=$(grep -ci '^access-control-allow-credentials:' "$HDRS" 2>/dev/null); ACAC=${ACAC:-0}
+    check "POST $ep с Origin evil.example: нет Access-Control-Allow-Origin" 0 "$ACAO"
+    check "POST $ep с Origin evil.example: нет Access-Control-Allow-Credentials" 0 "$ACAC"
+    grep -qi 'evil\.example' "$HDRS" \
+        && bad "в заголовках ответа $ep не упомянут чужой origin" "не упомянут" "упомянут" \
+        || ok "в заголовках ответа $ep чужой origin не упомянут"
+done
+
+curl -s -D "$WORK/pre" -o /dev/null -X OPTIONS "$BASE/api/auth/login" \
+     -H "Origin: https://evil.example" \
+     -H "Access-Control-Request-Method: POST" \
+     -H "Access-Control-Request-Headers: content-type"
+PRE_ACAO=$(grep -i '^access-control-allow-origin:' "$WORK/pre" 2>/dev/null | tr -d '\r')
+PRE_ACAC=$(grep -i '^access-control-allow-credentials:' "$WORK/pre" 2>/dev/null | tr -d '\r')
+check "preflight OPTIONS не разрешает evil.example" "" "$PRE_ACAO"
+check "preflight OPTIONS не разрешает credentials" "" "$PRE_ACAC"
+echo "        статус preflight: $(head -1 "$WORK/pre" | tr -d '\r')"
+
+check "login с Content-Type form-urlencoded" 415 \
+    "$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/api/auth/login" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        -d 'email=user@example.com&password=1234567890')"
+check "login без Content-Type" 415 \
+    "$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/api/auth/login" \
+        -d 'email=user@example.com&password=1234567890')"
+check "login с JSON остаётся рабочим" 200 \
+    "$(login "$USER_EMAIL" "$USER_PASSWORD" "$WORK/jc2" "$WORK/lc2.json")"
+
+# ---------------------------------------------------------------- очистка журнала
+head_ "Очистка журнала аудита (разрушающая проверка, снимок сохраняется)"
+SNAP="${AUDIT_SNAPSHOT:-/root/backups/audit-before-clear-$(date +%Y%m%d-%H%M%S).jsonl}"
+if mkdir -p "$(dirname "$SNAP")" 2>/dev/null; then
+    : > "$SNAP"
+    SP=0
+    while [ "$SP" -lt 50 ]; do
+        curl -s -H "Authorization: Bearer $TA" "$BASE$AUD?page=$SP&size=200" > "$WORK/snap.json"
+        jq -c '.items[]' < "$WORK/snap.json" >> "$SNAP" 2>/dev/null
+        SG=$(jq -r '.items | length' < "$WORK/snap.json" 2>/dev/null); SG=${SG:-0}
+        [ "$SG" -lt 200 ] && break
+        SP=$((SP + 1))
+    done
+    echo "        снимок журнала: $SNAP ($(wc -l < "$SNAP") строк) — очистка обратима"
+else
+    echo "        не удалось создать $(dirname "$SNAP") — снимаю снапшот во временный каталог"
+    SNAP="$WORK/audit-snapshot.jsonl"; : > "$SNAP"
+    curl -s -H "Authorization: Bearer $TA" "$BASE$AUD?page=0&size=200" | jq -c '.items[]' >> "$SNAP" 2>/dev/null
+    echo "        снимок журнала: $SNAP ($(wc -l < "$SNAP") строк)"
+fi
+
+check "POST $AUD/clear без токена" 401 "$(code POST "$AUD/clear")"
+check "POST $AUD/clear под USER"   403 "$(code POST "$AUD/clear" -H "Authorization: Bearer $TU")"
+BEFORE_CLEAR=$(curl -s -H "Authorization: Bearer $TA" "$BASE$AUD?size=1" | jq -r '.total')
+echo "        до очистки $BEFORE_CLEAR строк; сам этот запрос добавляет ещё одну AUDIT_READ,"
+echo "        поэтому фактически удалено должно быть на одну больше"
+check "POST $AUD/clear под ADMIN"  200 "$(code POST "$AUD/clear" -H "Authorization: Bearer $TA")"
+DELETED=$(jq -r '.deleted // empty' < "$WORK/body")
+if [ -n "$DELETED" ] && [ "$DELETED" -ge "$BEFORE_CLEAR" ]; then
+    ok "удалено $DELETED строк, не меньше $BEFORE_CLEAR"
+else
+    bad "число удалённых строк" ">= $BEFORE_CLEAR" "${DELETED:-пусто}"
+fi
+
+code GET "$AUD?size=5" -H "Authorization: Bearer $TA" >/dev/null
+check "после очистки в журнале ровно одна строка" 1 "$(jq -r '.total' < "$WORK/body")"
+check "эта строка — AUDIT_CLEAR"  "AUDIT_CLEAR" "$(jq -r '.items[0].event' < "$WORK/body")"
+check "в AUDIT_CLEAR записан актёр" "$ADMIN_EMAIL" "$(jq -r '.items[0].actorEmail' < "$WORK/body")"
+check "в AUDIT_CLEAR записана роль" "ADMIN" "$(jq -r '.items[0].actorRole' < "$WORK/body")"
+CLE_IP=$(jq -r '.items[0].ip // empty' < "$WORK/body")
+[ -n "$CLE_IP" ] && ok "в AUDIT_CLEAR записан IP ($CLE_IP)" || bad "IP в AUDIT_CLEAR" "не пусто" "пусто"
+check "details.count в AUDIT_CLEAR равен фактически удалённому" "${DELETED:-}" \
+      "$(jq -r '.items[0].details.count' < "$WORK/body")"
+
+# ---------------------------------------------------------------- --clean-audit
+if [ "$CLEAN_AUDIT" -eq 1 ]; then
+    head_ "Очистка следов самопроверок из audit_log (--clean-audit)"
+    SELF_IP="${SELF_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+    if command -v psql >/dev/null 2>&1 && [ -n "$SELF_IP" ]; then
+        cat > "$WORK/clean.sql" <<SQL
+\\pset tuples_only on
+create temp table _keep as select id from audit_log;
+delete from audit_log
+ where actor_email ~* '^(ratelimit-test|leak-test|admin)@seoniks\\.ru\$'
+    or target      ~* '^(ratelimit-test|leak-test|admin)@seoniks\\.ru\$'
+    or actor_email ~* '^smoke-[a-z]+-[0-9]+-[0-9]+@seoniks\\.ru\$'
+    or target      ~* '^smoke-[a-z]+-[0-9]+-[0-9]+@seoniks\\.ru\$'
+    or actor_email ~* '^cov(dis|rl)?-[0-9]+@seoniks\\.ru\$'
+    or target      ~* '^cov(dis|rl)?-[0-9]+@seoniks\\.ru\$'
+    or actor_email ~* '^lifecycle-(admin|victim)@seoniks\\.ru\$'
+    or target      ~* '^lifecycle-(admin|victim)@seoniks\\.ru\$'
+    or actor_email ~* '^xff-(probe[0-9]*|fixed)@seoniks\\.ru\$'
+    or target      ~* '^xff-(probe[0-9]*|fixed)@seoniks\\.ru\$'
+    or actor_email ~* '^bad-[0-9]+@seoniks\\.ru\$'
+    or coalesce(details->>'email','')      ~* '^(ratelimit-test|leak-test|admin)@seoniks\\.ru\$'
+    or coalesce(details->>'targetEmail','') ~* '^(ratelimit-test|leak-test|admin)@seoniks\\.ru\$'
+    or coalesce(details->>'email','')      ~* '^smoke-[a-z]+-[0-9]+-[0-9]+@seoniks\\.ru\$'
+    or coalesce(details->>'targetEmail','') ~* '^smoke-[a-z]+-[0-9]+-[0-9]+@seoniks\\.ru\$';
+SQL
+        cat >> "$WORK/clean.sql" <<SQL
+delete from audit_log
+ where actor_email in ('owner@seoniks.ru','user1@seoniks.ru')
+    and ip in ('127.0.0.1','$SELF_IP');
+delete from audit_log
+ where actor_email is null and ip in ('127.0.0.1','$SELF_IP');
+select 'удалено всего: ' || (select count(*) from _keep k where not exists
+        (select 1 from audit_log a where a.id = k.id));
+select 'осталось строк: ' || count(*) from audit_log;
+SQL
+        CLEAN_OUT=$(sudo -u postgres psql -d authdb -v ON_ERROR_STOP=1 < "$WORK/clean.sql" 2>&1)
+        CLEAN_RC=$?
+        printf '%s\n' "$CLEAN_OUT" | sed 's/^/        /'
+        check "очистка audit_log выполнена без ошибок psql" 0 "$CLEAN_RC"
+        echo "        критерий: тестовые адреса (ratelimit-test, leak-test, smoke-*, cov*, lifecycle-*, xff-*, bad-*, admin@)"
+        echo "                  плюс строки owner@/user1@ и безымянные, пришедшие с 127.0.0.1 или $SELF_IP"
+        echo "        строки реальных пользователей с внешних адресов сохранены"
+    else
+        echo "        psql недоступен или не определён адрес сервера — очистка пропущена"
+    fi
 fi
 
 # ---------------------------------------------------------------- итог
