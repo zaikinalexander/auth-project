@@ -6,7 +6,8 @@
       <h2>Создать пользователя</h2>
       <p>
         <input v-model="createForm.email" type="email" placeholder="Email" />
-        <input v-model="createForm.password" type="password" placeholder="Пароль (мин. 10 символов)" />
+        <input v-model="createForm.password" type="password" minlength="10" maxlength="128"
+               placeholder="Пароль (мин. 10 символов)" autocomplete="new-password" />
       </p>
       <p>
         <select v-model="createForm.role">
@@ -88,6 +89,8 @@ import { onMounted, reactive, ref } from 'vue'
 import { http } from '../api/http'
 
 const allPages = ['TEST_PAGE_1', 'TEST_PAGE_2', 'TEST_PAGE_3']
+const MIN_PASSWORD_LENGTH = 10
+const MAX_PASSWORD_LENGTH = 128
 
 const users = ref([])
 const listError = ref('')
@@ -114,8 +117,26 @@ async function load() {
   }
 }
 
+// Сервер требует не менее 10 символов, поэтому проверяем и здесь,
+// чтобы пользователь не получал 400 на ровном месте.
+function validateCreateForm() {
+  if (!createForm.email || createForm.email.indexOf('@') === -1) {
+    return 'Укажите корректный email'
+  }
+  if (!createForm.password || createForm.password.length < MIN_PASSWORD_LENGTH) {
+    return 'Пароль должен содержать не менее ' + MIN_PASSWORD_LENGTH + ' символов'
+  }
+  if (createForm.password.length > MAX_PASSWORD_LENGTH) {
+    return 'Пароль не должен быть длиннее ' + MAX_PASSWORD_LENGTH + ' символов'
+  }
+  return ''
+}
+
 async function createUser() {
-  createError.value = ''
+  createError.value = validateCreateForm()
+  if (createError.value) {
+    return
+  }
   try {
     await http.post('/admin/users', {
       email: createForm.email,
