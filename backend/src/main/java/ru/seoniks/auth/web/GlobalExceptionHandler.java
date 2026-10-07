@@ -13,6 +13,8 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import ru.seoniks.auth.error.ApiException;
 
 import java.util.HashMap;
@@ -67,6 +69,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException e) {
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
                 .body(Map.of("error", "Неподдерживаемый тип содержимого"));
+    }
+
+    // Несуществующий маршрут под разрешённым префиксом: фильтр безопасности его
+    // пропускает, а обработчика нет, поэтому без этого метода catch-all дал бы 500.
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<Map<String, String>> handleNotFound(Exception e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", "Не найдено"));
     }
 
     // Отказ от @PreAuthorize возникает внутри DispatcherServlet и не доходит до

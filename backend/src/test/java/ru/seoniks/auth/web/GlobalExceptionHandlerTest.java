@@ -12,6 +12,8 @@ import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import ru.seoniks.auth.error.ApiException;
 
 import java.util.Map;
@@ -101,6 +103,25 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<Map<String, String>> r = handler.handleMediaTypeNotSupported(e);
 
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    @Test
+    void unmappedRouteUnderAllowedPrefixGives404() {
+        NoResourceFoundException e = new NoResourceFoundException(
+                org.springframework.http.HttpMethod.GET, "api/admin/nonexistent");
+
+        ResponseEntity<Map<String, String>> r = handler.handleNotFound(e);
+
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(r.getBody()).containsEntry("error", "Не найдено");
+    }
+
+    @Test
+    void missingHandlerGives404() {
+        ResponseEntity<Map<String, String>> r = handler.handleNotFound(
+                new NoHandlerFoundException("GET", "/api/admin/x", new org.springframework.http.HttpHeaders()));
+
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test
