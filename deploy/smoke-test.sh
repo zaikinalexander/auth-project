@@ -207,6 +207,158 @@ check "тело 429" "Слишком много попыток входа. По�
 check "реальный вход под ADMIN не заблокирован" 200 \
     "$(login "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$WORK/jar_z" "$WORK/lz.json")"
 
+# ---------------------------------------------------------------- страницы
+head_ "Динамические страницы: CRUD администратором"
+SP="SMOKE_PAGE_$RANDOM"
+check "GET /api/admin/pages без токена" 401 "$(code GET /api/admin/pages)"
+check "GET /api/admin/pages под USER"   403 "$(code GET /api/admin/pages -H "Authorization: Bearer $TU")"
+check "GET /api/admin/pages под ADMIN"  200 "$(code GET /api/admin/pages -H "Authorization: Bearer $TA")"
+
+check "создание страницы" 201 "$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/api/admin/pages" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' \
+    -d "{\"code\":\"$SP\",\"title\":\"Страница smoke\",\"content\":\"Строка один\nСтрока два\"}")"
+check "код созданной страницы" "$SP" "$(jq -r '.code' < "$WORK/body")"
+check "содержимое с переносом строки сохранено" "Строка один
+Строка два" "$(jq -r '.content' < "$WORK/body")"
+
+code GET /api/admin/pages -H "Authorization: Bearer $TA" >/dev/null
+jq -e --arg c "$SP" '[.[] | select(.code == $c)] | length == 1' < "$WORK/body" >/dev/null \
+  && ok "новая страница есть в списке" || bad "новая страница в списке" "есть" "нет"
+
+check "правка title и content" 200 "$(curl -s -o "$WORK/body" -w '%{http_code}' -X PUT "$BASE/api/admin/pages/$SP" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' \
+    -d '{"title":"Страница smoke (ред.)","content":"Обновлённое содержимое"}')"
+check "заголовок изменился" "Страница smoke (ред.)" "$(jq -r '.title' < "$WORK/body")"
+check "код после правки прежний" "$SP" "$(jq -r '.code' < "$WORK/body")"
+# тело намеренно повторяет предыдущее сохранение, чтобы проверка не затирала состояние
+check "попытка передать code в теле игнорируется" "$SP" \
+    "$(curl -s -X PUT "$BASE/api/admin/pages/$SP" -H "Authorization: Bearer $TA" \
+        -H 'Content-Type: application/json' \
+        -d '{"code":"HACKED","title":"Страница smoke (ред.)","content":"Обновлённое содержимое"}' | jq -r '.code')"
+
+check "код в нижнем регистре"    400 "$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/api/admin/pages" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' \
+    -d "{\"code\":\"$(echo "$SP" | tr 'A-Z' 'a-z')\",\"title\":\"t\",\"content\":\"c\"}")"
+check "код короче 3 символов"    400 "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/admin/pages" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' -d '{"code":"AB","title":"t","content":"c"}')"
+check "код с дефисом"            400 "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/admin/pages" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' -d '{"code":"PAGE-1","title":"t","content":"c"}')"
+check "дубликат кода"            409 "$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/api/admin/pages" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' \
+    -d "{\"code\":\"$SP\",\"title\":\"t\",\"content\":\"c\"}")"
+check "правка несуществующей страницы" 404 "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/admin/pages/NO_SUCH_PAGE_XYZ" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' -d '{"title":"t","content":"c"}')"
+
+head_ "Динамические страницы: доступ пользователя"
+check "USER видит назначенную TEST_PAGE_1" 200 "$(code GET /api/pages/TEST_PAGE_1 -H "Authorization: Bearer $TU")"
+check "USER не видит новую страницу до назначения" 403 "$(code GET "/api/pages/$SP" -H "Authorization: Bearer $TU")"
+check "ADMIN видит новую страницу" 200 "$(code GET "/api/pages/$SP" -H "Authorization: Bearer $TA")"
+check "код страницы регистрозависим" 403 "$(code GET "/api/pages/$(echo "$SP" | tr 'A-Z' 'a-z')" -H "Authorization: Bearer $TU")"
+
+code GET /api/admin/users -H "Authorization: Bearer $TA" >/dev/null
+UID1=$(jq -r --arg e "$USER_EMAIL" '.[] | select(.email == $e) | .id' < "$WORK/body")
+check "назначение новой страницы пользователю" 200 "$(code PUT "/api/admin/users/$UID1/pages" \
+    -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' \
+    -d "{\"pages\":[\"TEST_PAGE_1\",\"$SP\"]}")"
+login "$USER_EMAIL" "$USER_PASSWORD" "$WORK/jp2" "$WORK/lp2.json" >/dev/null
+TP2="$(tok "$WORK/lp2.json")"
+check "USER видит назначенную новую страницу" 200 "$(code GET "/api/pages/$SP" -H "Authorization: Bearer $TP2")"
+check "содержимое пришло из базы" "Обновлённое содержимое" "$(json '.content')"
+check "неназначенная TEST_PAGE_3" 403 "$(code GET /api/pages/TEST_PAGE_3 -H "Authorization: Bearer $TP2")"
+
+head_ "Динамические страницы: удаление и каскад"
+check "удаление страницы" 204 "$(code DELETE "/api/admin/pages/$SP" -H "Authorization: Bearer $TA")"
+check "повторное удаление" 404 "$(code DELETE "/api/admin/pages/$SP" -H "Authorization: Bearer $TA")"
+check "USER после удаления: право снято каскадом" 403 "$(code GET "/api/pages/$SP" -H "Authorization: Bearer $TP2")"
+check "ADMIN после удаления" 404 "$(code GET "/api/pages/$SP" -H "Authorization: Bearer $TA")"
+check "назначение TEST_PAGE_1 у пользователя восстановлено" 200 \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/admin/users/$UID1/pages" \
+        -H "Authorization: Bearer $TA" -H 'Content-Type: application/json' -d '{"pages":["TEST_PAGE_1"]}')"
+login "$USER_EMAIL" "$USER_PASSWORD" "$WORK/ju" "$WORK/lu.json" >/dev/null
+TU="$(tok "$WORK/lu.json")"
+
+# ---------------------------------------------------------------- сессии
+head_ "Сессии: список и обрыв"
+SU="smoke-sess-$RANDOM-$RANDOM@seoniks.ru"; SPASS=$(openssl rand -hex 16)
+curl -s -o "$WORK/body" -X POST "$BASE/api/admin/users" -H "Authorization: Bearer $TA" \
+     -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$SU\",\"password\":\"$SPASS\",\"role\":\"USER\",\"pages\":[\"TEST_PAGE_1\"]}" >/dev/null
+SUID=$(jq -r '.id' < "$WORK/body")
+check "временный пользователь для сессий создан" "yes" "$([ "$SUID" != null ] && [ -n "$SUID" ] && echo yes || echo no)"
+
+login "$SU" "$SPASS" "$WORK/js1" "$WORK/ls1.json" >/dev/null; TS1="$(tok "$WORK/ls1.json")"
+login "$SU" "$SPASS" "$WORK/js2" "$WORK/ls2.json" >/dev/null; TS2="$(tok "$WORK/ls2.json")"
+
+check "GET /api/me/sessions без токена" 401 "$(code GET /api/me/sessions)"
+check "GET /api/me/sessions под USER" 200 "$(code GET /api/me/sessions -H "Authorization: Bearer $TS1")"
+check "своих сессий две" 2 "$(jq 'length' < "$WORK/body")"
+check "помечена ровно одна current" 1 "$(jq '[.[]|select(.current)]|length' < "$WORK/body")"
+check "в списке только свой email" "$SU" "$(jq -r '[.[].userEmail]|unique|join(",")' < "$WORK/body")"
+check "в сессии есть ip" "yes" "$(jq -r 'if (.[0].ip // "") == "" then "no" else "yes" end' < "$WORK/body")"
+check "в сессии есть user_agent" "yes" "$(jq -r 'if (.[0].userAgent // "") == "" then "no" else "yes" end' < "$WORK/body")"
+check "в сессии есть created и lastUsed" "yes" \
+    "$(jq -r 'if (.[0].createdAt != null and .[0].lastUsedAt != null) then "yes" else "no" end' < "$WORK/body")"
+FAM1=$(jq -r '.[]|select(.current)|.familyId' < "$WORK/body")
+
+check "GET /api/admin/sessions без токена" 401 "$(code GET /api/admin/sessions)"
+check "GET /api/admin/sessions под USER"   403 "$(code GET /api/admin/sessions -H "Authorization: Bearer $TS1")"
+check "GET /api/admin/sessions под ADMIN"  200 "$(code GET /api/admin/sessions -H "Authorization: Bearer $TA")"
+jq -e --arg e "$SU" '[.[] | select(.userEmail == $e)] | length >= 2' < "$WORK/body" >/dev/null \
+  && ok "админ видит обе сессии временного пользователя" || bad "сессии временного пользователя в админском списке" ">=2" "меньше"
+check "фильтр /api/admin/sessions?user= работает" "$SU" \
+    "$(code GET "/api/admin/sessions?user=$SU" -H "Authorization: Bearer $TA" >/dev/null; jq -r '[.[].userEmail]|unique|join(",")' < "$WORK/body")"
+
+# /api/me/sessions всегда возвращает только свои, в том числе администратору
+code GET /api/me/sessions -H "Authorization: Bearer $TA" >/dev/null
+check "под ADMIN /api/me/sessions отдаёт только свои" "$ADMIN_EMAIL" \
+    "$(jq -r '[.[].userEmail]|unique|join(",")' < "$WORK/body")"
+jq -e --arg e "$SU" '[.[] | select(.userEmail == $e)] | length == 0' < "$WORK/body" >/dev/null \
+  && ok "чужие сессии в /api/me/sessions не видны даже администратору" \
+  || bad "изоляция /api/me/sessions" "чужих нет" "чужие видны"
+
+check "обрыв одной сессии администратором" 204 "$(code DELETE "/api/admin/sessions/$FAM1" -H "Authorization: Bearer $TA")"
+check "refresh оборванной сессии"   401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$WORK/js1" "$BASE/api/auth/refresh")"
+check "вторая сессия того же пользователя жива" 200 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$WORK/js2" -c "$WORK/js2" "$BASE/api/auth/refresh")"
+check "повторный обрыв той же семьи" 404 "$(code DELETE "/api/admin/sessions/$FAM1" -H "Authorization: Bearer $TA")"
+check "обрыв несуществующей семьи"   404 "$(code DELETE "/api/admin/sessions/no-such-family" -H "Authorization: Bearer $TA")"
+
+login "$SU" "$SPASS" "$WORK/js3" "$WORK/ls3.json" >/dev/null; TS3="$(tok "$WORK/ls3.json")"
+check "DELETE /api/me/sessions/other" 200 "$(code DELETE /api/me/sessions/other -H "Authorization: Bearer $TS3")"
+check "оборвана одна чужая сессия" 1 "$(jq -r '.revoked' < "$WORK/body")"
+check "текущая сессия жива" 200 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$WORK/js3" -c "$WORK/js3" "$BASE/api/auth/refresh")"
+check "чужая сессия мертва"  401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$WORK/js2" "$BASE/api/auth/refresh")"
+
+check "DELETE /api/admin/users/{id}/sessions" 200 "$(code DELETE "/api/admin/users/$SUID/sessions" -H "Authorization: Bearer $TA")"
+check "refresh после обрыва всех" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$WORK/js3" "$BASE/api/auth/refresh")"
+check "access-токен доживает свои 15 минут" 200 "$(code GET /api/auth/me -H "Authorization: Bearer $TS3")"
+code GET /api/me/sessions -H "Authorization: Bearer $TS3" >/dev/null
+check "список своих сессий пуст" 0 "$(jq 'length' < "$WORK/body")"
+check "оборвать сессии несуществующего пользователя" 404 \
+    "$(code DELETE "/api/admin/users/00000000-0000-0000-0000-000000000000/sessions" -H "Authorization: Bearer $TA")"
+check "временный пользователь удалён" 204 "$(code DELETE "/api/admin/users/$SUID" -H "Authorization: Bearer $TA")"
+
+head_ "Смена пароля"
+PU="smoke-pwd-$RANDOM-$RANDOM@seoniks.ru"; PPASS=$(openssl rand -hex 16); PNEW=$(openssl rand -hex 16)
+curl -s -o "$WORK/body" -X POST "$BASE/api/admin/users" -H "Authorization: Bearer $TA" \
+     -H 'Content-Type: application/json' \
+     -d "{\"email\":\"$PU\",\"password\":\"$PPASS\",\"role\":\"USER\",\"pages\":[\"TEST_PAGE_1\"]}" >/dev/null
+PUID=$(jq -r '.id' < "$WORK/body")
+login "$PU" "$PPASS" "$WORK/jw" "$WORK/lw.json" >/dev/null; TW="$(tok "$WORK/lw.json")"
+check "POST /api/auth/password без токена" 401 "$(code POST /api/auth/password -H 'Content-Type: application/json' \
+    -d "{\"currentPassword\":\"$PPASS\",\"newPassword\":\"$PNEW\"}")"
+check "неверный текущий пароль" 400 "$(code POST /api/auth/password -H "Authorization: Bearer $TW" \
+    -H 'Content-Type: application/json' -d "{\"currentPassword\":\"not-the-password\",\"newPassword\":\"$PNEW\"}")"
+check "новый пароль короче 10" 400 "$(code POST /api/auth/password -H "Authorization: Bearer $TW" \
+    -H 'Content-Type: application/json' -d "{\"currentPassword\":\"$PPASS\",\"newPassword\":\"short\"}")"
+check "новый пароль совпадает с текущим" 400 "$(code POST /api/auth/password -H "Authorization: Bearer $TW" \
+    -H 'Content-Type: application/json' -d "{\"currentPassword\":\"$PPASS\",\"newPassword\":\"$PPASS\"}")"
+check "успешная смена пароля" 204 "$(code POST /api/auth/password -H "Authorization: Bearer $TW" \
+    -H 'Content-Type: application/json' -d "{\"currentPassword\":\"$PPASS\",\"newPassword\":\"$PNEW\"}")"
+check "старым паролем войти нельзя" 401 "$(login "$PU" "$PPASS" "$WORK/jx" "$WORK/lx.json")"
+check "новым паролем войти можно"   200 "$(login "$PU" "$PNEW" "$WORK/jy" "$WORK/ly.json")"
+check "refresh прежней сессии отозван" 401 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$WORK/jw" "$BASE/api/auth/refresh")"
+check "временный пользователь удалён" 204 "$(code DELETE "/api/admin/users/$PUID" -H "Authorization: Bearer $TA")"
+
 # ---------------------------------------------------------------- аудит: доступ
 head_ "Журнал аудита: разграничение доступа"
 AUD='/api/admin/audit'
@@ -443,7 +595,11 @@ delete from audit_log
     or coalesce(details->>'email','')      ~* '^(ratelimit-test|leak-test|admin)@seoniks\\.ru\$'
     or coalesce(details->>'targetEmail','') ~* '^(ratelimit-test|leak-test|admin)@seoniks\\.ru\$'
     or coalesce(details->>'email','')      ~* '^smoke-[a-z]+-[0-9]+-[0-9]+@seoniks\\.ru\$'
-    or coalesce(details->>'targetEmail','') ~* '^smoke-[a-z]+-[0-9]+-[0-9]+@seoniks\\.ru\$';
+    or coalesce(details->>'targetEmail','') ~* '^smoke-[a-z]+-[0-9]+-[0-9]+@seoniks\\.ru\$'
+    or target ~* '^(SMOKE_PAGE|JOURNEY_PAGE)_[0-9]+\$'
+    or coalesce(details->>'code','') ~* '^(SMOKE_PAGE|JOURNEY_PAGE)_[0-9]+\$'
+    or actor_email ~* '^(journey|sess-test)-[0-9]+@seoniks\\.ru\$'
+    or target      ~* '^(journey|sess-test)-[0-9]+@seoniks\\.ru\$';
 SQL
         cat >> "$WORK/clean.sql" <<SQL
 delete from audit_log
