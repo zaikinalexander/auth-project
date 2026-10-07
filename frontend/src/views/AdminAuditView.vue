@@ -9,7 +9,7 @@
           <option value="">Все события</option>
           <option v-for="name in eventNames" :key="name" :value="name">{{ name }}</option>
         </select>
-        <input v-model="filters.actor" type="text" placeholder="Email актёра (подстрока)" />
+        <input v-model="filters.actor" type="text" placeholder="Email субъекта (подстрока)" />
       </p>
       <p>
         <label class="check">с <input v-model="filters.from" type="date" /></label>
@@ -31,10 +31,10 @@
             <th></th>
             <th>Время</th>
             <th>Событие</th>
-            <th>Актёр</th>
+            <th>Субъект</th>
             <th>IP</th>
-            <th>Цель</th>
-            <th>Успех</th>
+            <th>Объект</th>
+            <th>Результат</th>
           </tr>
         </thead>
         <tbody>
@@ -54,7 +54,7 @@
             <tr v-if="expanded === row.id" class="details">
               <td></td>
               <td colspan="6">
-                <div v-if="row.actorRole">Роль актёра: {{ row.actorRole }}</div>
+                <div v-if="row.actorRole">Роль субъекта: {{ row.actorRole }}</div>
                 <div v-if="row.userAgent">User-Agent: {{ row.userAgent }}</div>
                 <div v-for="(value, key) in row.details || {}" :key="key">{{ key }}: {{ formatValue(value) }}</div>
                 <div v-if="!row.details || !Object.keys(row.details).length">Деталей нет</div>
@@ -114,8 +114,11 @@ const eventNames = [
   'AUTH_LOGIN_SUCCESS', 'AUTH_LOGIN_FAIL', 'AUTH_LOGOUT',
   'AUTH_REFRESH_OK', 'AUTH_REFRESH_REUSE', 'AUTH_REFRESH_INVALID',
   'RATE_LIMIT_HIT',
+  'AUTH_PASSWORD_CHANGED', 'AUTH_PASSWORD_CHANGE_FAIL', 'AUTH_SESSIONS_REVOKED_SELF',
   'ADMIN_USER_CREATE', 'ADMIN_USER_UPDATE', 'ADMIN_USER_PAGES', 'ADMIN_USER_DELETE',
-  'PAGE_VIEW', 'PAGE_DENIED', 'AUDIT_READ'
+  'ADMIN_PAGE_CREATE', 'ADMIN_PAGE_UPDATE', 'ADMIN_PAGE_DELETE',
+  'ADMIN_SESSION_REVOKE',
+  'PAGE_VIEW', 'PAGE_DENIED', 'AUDIT_READ', 'AUDIT_CLEAR'
 ]
 
 const items = ref([])
@@ -138,7 +141,7 @@ function formatTime(ts) {
 
 function formatSuccess(value) {
   if (value === null || value === undefined) return '—'
-  return value ? 'да' : 'нет'
+  return value ? 'успешно' : 'отказ'
 }
 
 function formatValue(value) {

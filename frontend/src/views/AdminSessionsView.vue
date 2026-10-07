@@ -11,10 +11,10 @@
       </p>
       <p v-if="error" class="error">{{ error }}</p>
       <p class="hint">
-        Обрыв сессии удаляет refresh-токен немедленно: обновить access-токен
-        устройство больше не сможет. Уже выданный access-токен доживает свои
-        15 минут — он stateless и по хранилищу не проверяется. Это свойство
-        схемы из технического задания, а не ошибка.
+        Завершение сессии немедленно удаляет её refresh-токен: обновить
+        access-токен устройство больше не сможет. Уже выданный access-токен
+        доживает свои 15 минут — он stateless и по хранилищу не проверяется.
+        Так устроена схема из технического задания, это не ошибка.
       </p>
     </div>
 
@@ -23,7 +23,7 @@
       <table>
         <thead>
           <tr>
-            <th>Пользователь</th><th>Семья</th><th>Создана</th>
+            <th>Пользователь</th><th>Семейство</th><th>Создана</th>
             <th>Последняя активность</th><th>IP</th><th>User-Agent</th><th></th>
           </tr>
         </thead>
@@ -35,7 +35,7 @@
             <td>{{ formatDate(s.lastUsedAt) }}</td>
             <td>{{ s.ip || '—' }}</td>
             <td class="ua" :title="s.userAgent">{{ s.userAgent || '—' }}</td>
-            <td><button class="danger" @click="revoke(s)">Оборвать</button></td>
+            <td><button class="danger" @click="revoke(s)">Завершить</button></td>
           </tr>
           <tr v-if="!sessions.length"><td colspan="7">Активных сессий нет</td></tr>
         </tbody>
@@ -80,14 +80,14 @@ function reset() {
 
 async function revoke(s) {
   const who = s.userEmail || 'неизвестного пользователя'
-  if (!window.confirm('Оборвать сессию ' + who + ' (' + short(s.familyId) + ')?')) return
+  if (!window.confirm('Завершить сессию ' + who + ' (' + short(s.familyId) + ')?')) return
   try {
     await http.delete('/admin/sessions/' + encodeURIComponent(s.familyId))
     await load()
   } catch (e) {
     error.value = e.response && e.response.data && e.response.data.error
       ? e.response.data.error
-      : 'Не удалось оборвать сессию'
+      : 'Не удалось завершить сессию'
   }
 }
 

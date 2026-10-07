@@ -48,7 +48,7 @@
             <td>{{ user.pages.join(', ') || '—' }}</td>
             <td>
               <button class="primary" @click="startEdit(user)">Изменить</button>
-              <button @click="revokeSessions(user)">Оборвать сессии</button>
+              <button @click="revokeSessions(user)">Завершить сессии</button>
               <button class="danger" @click="removeUser(user)">Удалить</button>
             </td>
           </tr>
@@ -181,20 +181,19 @@ async function saveEdit() {
   }
 }
 
-// Обрывает все refresh-токены пользователя. Access-токены доживают свои
-// 15 минут: они stateless и по хранилищу не проверяются.
+// Завершает все сессии пользователя: refresh-токены удаляются сразу.
+// Access-токены доживают свои 15 минут: они stateless и по хранилищу
+// не проверяются.
 async function revokeSessions(user) {
-  const warning = 'Оборвать все активные сессии ' + user.email + '?\n\n'
+  const warning = 'Завершить все активные сессии ' + user.email + '?\n\n'
     + 'Устройствам придётся войти заново. Доступ, уже открытый выданным\n'
     + 'access-токеном, сохранится не дольше 15 минут.'
   if (!window.confirm(warning)) return
   try {
     const { data } = await http.delete('/admin/users/' + user.id + '/sessions')
-    window.alert('Оборвано сессий: ' + (data && data.revoked !== undefined ? data.revoked : 0))
+    window.alert('Завершено сессий: ' + (data && data.revoked !== undefined ? data.revoked : 0))
   } catch (e) {
-    error.value = e.response && e.response.data && e.response.data.error
-      ? e.response.data.error
-      : 'Не удалось оборвать сессии'
+    listError.value = errorMessage(e, 'Не удалось завершить сессии')
   }
 }
 
