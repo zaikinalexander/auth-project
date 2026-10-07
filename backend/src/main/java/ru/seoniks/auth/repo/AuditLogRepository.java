@@ -15,4 +15,9 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long>,
     @Modifying
     @Query("delete from AuditLog a where a.ts < :cutoff")
     int deleteOlderThan(@Param("cutoff") Instant cutoff);
+
+    // В отличие от deleteAllInBatch возвращает число удалённых строк.
+    @Modifying
+    @Query("delete from AuditLog a")
+    int deleteAllEntries();
 }

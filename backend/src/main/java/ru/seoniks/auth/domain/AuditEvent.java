@@ -14,5 +14,6 @@ public enum AuditEvent {
     ADMIN_USER_DELETE,
     PAGE_VIEW,
     PAGE_DENIED,
-    AUDIT_READ
+    AUDIT_READ,
+    AUDIT_CLEAR
 }

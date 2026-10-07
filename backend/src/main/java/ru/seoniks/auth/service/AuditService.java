@@ -110,6 +110,20 @@ public class AuditService {
         }
     }
 
+    /**
+     * Полная очистка журнала. След действия сохраняется: после удаления пишется
+     * одна запись AUDIT_CLEAR с актёром, адресом, User-Agent и числом удалённых
+     * строк, поэтому факт очистки нельзя скрыть.
+     */
+    public int clear() {
+        // Integer.valueOf обязателен: execute выводит T из возвращаемого типа,
+        // а примитив int аргументом типа быть не может.
+        Integer deleted = requiresNew.execute(status -> Integer.valueOf(repository.deleteAllEntries()));
+        int count = deleted == null ? 0 : deleted;
+        record(AuditEvent.AUDIT_CLEAR, true, null, Map.of("count", count));
+        return count;
+    }
+
     public AuditPageDto search(int page, int size, String event, String actor, String from, String to) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);

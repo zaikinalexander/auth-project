@@ -19,6 +19,7 @@
       <p>
         <button class="primary" @click="apply">Применить</button>
         <button @click="reset">Сбросить</button>
+        <button v-if="auth.isAdmin" class="danger clear-btn" @click="askClear">Очистить журнал</button>
       </p>
     </div>
 
@@ -76,12 +77,38 @@
         </select>
       </p>
     </div>
+    <div v-if="confirmVisible" class="overlay" @click.self="closeConfirm">
+      <div class="card modal">
+        <h2>Очистка журнала аудита</h2>
+        <p>Будут удалены все записи журнала (сейчас их {{ total }}). Действие необратимо.</p>
+        <p>
+          После очистки в журнале останется одна запись <code>AUDIT_CLEAR</code>
+          с указанием, кто, когда и с какого адреса её выполнил, — скрыть сам
+          факт очистки нельзя.
+        </p>
+        <p>
+          Для подтверждения введите слово <strong>ОЧИСТИТЬ</strong>
+          <input v-model="confirmWord" type="text" autocomplete="off" spellcheck="false" />
+        </p>
+        <p v-if="clearError" class="error">{{ clearError }}</p>
+        <p>
+          <button class="danger" :disabled="confirmWord !== CONFIRM_WORD || clearing" @click="doClear">
+            {{ clearing ? 'Очистка…' : 'Подтвердить очистку' }}
+          </button>
+          <button :disabled="clearing" @click="closeConfirm">Отмена</button>
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { http } from '../api/http'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
+const CONFIRM_WORD = 'ОЧИСТИТЬ'
 
 const eventNames = [
   'AUTH_LOGIN_SUCCESS', 'AUTH_LOGIN_FAIL', 'AUTH_LOGOUT',
@@ -99,6 +126,10 @@ const size = ref(50)
 const expanded = ref(null)
 const error = ref('')
 const filters = reactive({ event: '', actor: '', from: '', to: '' })
+const confirmVisible = ref(false)
+const confirmWord = ref('')
+const clearing = ref(false)
+const clearError = ref('')
 
 function formatTime(ts) {
   if (!ts) return '—'
@@ -159,6 +190,35 @@ function reset() {
   go(0)
 }
 
+function askClear() {
+  confirmWord.value = ''
+  clearError.value = ''
+  confirmVisible.value = true
+}
+
+function closeConfirm() {
+  if (!clearing.value) confirmVisible.value = false
+}
+
+async function doClear() {
+  if (confirmWord.value !== CONFIRM_WORD || clearing.value) return
+  clearing.value = true
+  clearError.value = ''
+  try {
+    await http.post('/admin/audit/clear')
+    confirmVisible.value = false
+    expanded.value = null
+    page.value = 0
+    await load()
+  } catch (e) {
+    clearError.value = e.response && e.response.data && e.response.data.error
+      ? e.response.data.error
+      : 'Не удалось очистить журнал'
+  } finally {
+    clearing.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -175,6 +235,31 @@ onMounted(load)
 .pager {
   margin: 0 12px;
   font-size: 14px;
+}
+.clear-btn {
+  margin-left: 12px;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 41, 51, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.modal {
+  max-width: 480px;
+  margin: 0;
+}
+.modal input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+}
+.modal button {
+  margin-right: 8px;
 }
 table button {
   border: 1px solid #cbd2d9;
