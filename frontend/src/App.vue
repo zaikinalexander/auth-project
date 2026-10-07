@@ -3,6 +3,7 @@
     <header v-if="auth.isAuthenticated" class="topbar">
       <nav>
         <router-link v-if="auth.isAdmin" to="/admin/users">Пользователи</router-link>
+        <router-link v-if="auth.isAdmin" to="/admin/audit">Журнал</router-link>
         <template v-for="code in allPages" :key="code">
           <router-link v-if="auth.hasPage(code)" :to="'/pages/' + code">
             {{ code }}
